@@ -3,59 +3,62 @@ var fs = require("fs"),
     colors = require("colors");
 
 module.exports = function(opts) {
-    var excludes = [],
-        includes,
-        regex,
+    var regex = new RegExp(options.regex, flags),
         canReplace,
         replaceFunc,
         lineCount = 0,
         limit = 400, // chars per line
+        flags = "g", // global multiline
         options;
 
     options = opts;
     if (!options.color) options.color = "cyan";
-    var flags = "g"; // global multiline
-    if (options.ignoreCase) {
-        flags += "i";
-    }
-    if (options.multiline) {
-        flags += "m";
-    }
-    regex = new RegExp(options.regex, flags);
+    if (options.ignoreCase) flags += "i";
+    if (options.multiline) flags += "m";
+
     canReplace = !options.preview && options.replacement !== undefined;
 
-    if (options.include) {
-        includes = options.include.split(",").map(patternToRegex);
-    }
-    if (options.exclude) {
-        excludes = options.exclude.split(",");
-    }
+    var includes = getTheIncludes(options);
+
+    var excludes = getTheExcludes(options);
+
     var listFile = options.excludeList || path.join(__dirname, '/defaultignore');
     var list = fs.readFileSync(listFile, "utf-8").split("\n");
-    excludes = excludes.concat(list)
+
+    if (options.funcFile)
+       eval('replaceFunc = ' + fs.readFileSync(options.funcFile, "utf-8"));
+
+    for (var i = 0; i < options.path.length; i++) {
+        if(options.async)
+            replacizeFile(options.path[i], canReplace);
+        else
+            replacizeFileSync(options.path[i], includes);
+    }
+
+    function getTheIncludes(options){
+      var includes;
+      if (options.include)
+          includes = options.include.split(",").map(patternToRegex);
+      return includes;
+    }
+
+    function getTheExcludes(options){
+      excludes = [];
+      if (options.exclude)
+          excludes = options.exclude.split(",");
+      excludes.concat(list)
         .filter(function(line) {
             return line && line.indexOf("#");
         })
         .map(patternToRegex);
-
-    if (options.funcFile) {
-       eval('replaceFunc = ' + fs.readFileSync(options.funcFile, "utf-8"));
-    }
-
-    for (var i = 0; i < options.path.length; i++) {
-        if(options.async) {
-            replacizeFile(options.path[i]);
-        }
-        else {
-            replacizeFileSync(options.path[i]);
-        }
+      return excludes;
     }
 
     function patternToRegex(pattern) {
         return new RegExp("^" + pattern.replace(/\./g, '\\.').replace(/\*/g, '.*').trim() + "$");
     }
 
-    function includeFile(file) {
+    function includeFile(file, includes) {
         if (includes) {
             for (var i = 0; i < includes.length; i++) {
                 if (file.match(includes[i]))
@@ -72,7 +75,7 @@ module.exports = function(opts) {
         }
     }
 
-    function replacizeFile(file) {
+    function replacizeFile(file, canReplace) {
       fs.lstat(file, function(err, stats) {
           if (err) throw err;
 
@@ -112,14 +115,14 @@ module.exports = function(opts) {
        });
     }
 
-    function replacizeFileSync(file) {
+    function replacizeFileSync(file, includes) {
       var stats = fs.lstatSync(file);
       if (stats.isSymbolicLink()) {
           // don't follow symbolic links for now
           return;
       }
       if (stats.isFile()) {
-          if (!includeFile(file)) {
+          if (!includeFile(file, includes)) {
               return;
           }
           var text = fs.readFileSync(file, "utf-8");
@@ -131,9 +134,8 @@ module.exports = function(opts) {
       }
       else if (stats.isDirectory() && options.recursive) {
           var files = fs.readdirSync(file);
-          for (var i = 0; i < files.length; i++) {
-              replacizeFileSync(path.join(file, files[i]));
-          }
+          for (var i = 0; i < files.length; i++)
+              replacizeFileSync(path.join(file, files[i]), includes);
       }
     }
 
@@ -171,3 +173,4 @@ module.exports = function(opts) {
         }
     }
 }
+
